@@ -5,7 +5,10 @@ build/
 # Local environment variables
 .envrc
 .direnv/
+Makefile.local
 
 # Output data (no need to track downloaded proxies)
 downloaded-proxies.txt
 downloaded-proxies.txt.bak
+valid-proxies.txt
+valid-proxies.txt.bak
