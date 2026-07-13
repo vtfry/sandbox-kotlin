@@ -74,7 +74,10 @@ fun saveProxiesWithBackup(
             println("[$logTag] INFO: Rotated to: ${backupFile.absolutePath}")
         }
 
-        file.writeText(content)
+        file.bufferedWriter().use { writer ->
+            writer.write(content)
+            writer.write("\n")
+        }
         println("[$logTag] SUCCESS: Saved $proxyCount proxies to: ${file.absolutePath}")
     } catch (e: Exception) {
         System.err.println("[$logTag] ERROR: Failed to write output file: ${e.message}")
@@ -133,7 +136,7 @@ fun main() {
     // Analyze existing file
     val oldHash =
         if (outFile.exists()) {
-            val content = outFile.readText()
+            val content = outFile.readText().trimEnd()
             val hash = calculateHash(content)
             val linesCount = content.lines().filter { it.isNotBlank() }.count()
             println(

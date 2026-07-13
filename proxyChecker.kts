@@ -130,7 +130,12 @@ fun saveValidProxies(
             println("[$logTag] INFO: Rotated old valid file to: ${backupFile.name}")
         }
 
-        file.writeText(proxies.joinToString("\n"))
+        file.bufferedWriter().use { writer ->
+            proxies.forEach { proxy ->
+                writer.write(proxy)
+                writer.write("\n")
+            }
+        }
         println("[$logTag] SUCCESS: Wrote ${proxies.size} working proxies to: ${file.absolutePath}")
     } catch (e: Exception) {
         System.err.println(
