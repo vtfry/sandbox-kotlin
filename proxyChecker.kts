@@ -241,6 +241,11 @@ fun main() {
         saveValidProxies(validProxiesQueue.toList(), validFileName)
     } else {
         System.err.println("[$logTag] WARNING: No valid proxies found during this round.")
+
+        try {
+            File("$validFileName.tested").writeText("")
+        } catch (e: Exception) {
+        }
     }
 }
 
