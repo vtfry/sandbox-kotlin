@@ -1,144 +1,168 @@
 /**
- * @file ProxyParser
- * Downloads, cleans, and syncs a text-based proxy list from a GitHub Raw URL.
+ * Proxy parser utility.
+ *
+ * Downloads, cleans, and syncs a text-based proxy list from a GitHub raw URL.
  * Uses SHA-256 caching to prevent redundant disk writes and manages file rotation.
  */
-
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import kotlin.system.exitProcess
 
-val DEFAULT_FILE_NAME = "downloaded-proxies.txt"
+// Logging and identification
+val logTag = "proxyParser"
+
+// Default configuration values
+val defaultFileName = "downloaded-proxies.txt"
+
+val targetUrl =
+    System.getenv("TARGET_URL")
+        ?: run {
+            System.err.println("[$logTag] ERROR: TARGET_URL is not set in .envrc")
+            exitProcess(ExitCode.UsageError.value)
+        }
+
+val fileName = System.getenv("PROXY_FILE_NAME") ?: defaultFileName
 
 /**
- * System exit codes adhering to Unix standards.
+ * System exit codes adhering to `Unix` standards.
  */
-enum class ExitCode(val value: Int) {
-    SUCCESS(0),
-    ERROR(1),
-    ERROR_USAGE(64),
-    ERROR_NOHOST(68),
-    ERROR_VALIDATION(78),
-    ERROR_IO(74)
+enum class ExitCode(
+    val value: Int,
+) {
+    Success(0),
+    Failure(1),
+    UsageError(64),
+    NoHostError(68),
+    ValidationError(78),
+    IoError(74),
 }
 
-fun main() {
-    println("INFO: Starting proxy parser...")
+/**
+ * Calculates SHA-256 hash of a given string.
+ *
+ * @param input the [String] to be hashed.
+ * @return the hex-encoded string of the calculated digest.
+ */
+fun calculateHash(input: String): String =
+    MessageDigest
+        .getInstance("SHA-256")
+        .digest(input.toByteArray())
+        .joinToString("") { byte -> "%02x".format(byte) }
 
-    val targetUrl = System.getenv("TARGET_URL")
-    if (targetUrl == null) {
-        System.err.println("ERROR: TARGET_URL is not set in .envrc")
-        exitProcess(ExitCode.ERROR_USAGE.value)
-    }
+/**
+ * Backs up the existing file if it exists and writes the fresh proxy list.
+ *
+ * @param content the clean proxy list string to write.
+ * @param proxyCount the total number of successfully parsed proxies.
+ * @param file the destination [File] object.
+ * @throws RuntimeException via [exitProcess] if a critical I/O failure occurs.
+ */
+fun saveProxiesWithBackup(
+    content: String,
+    proxyCount: Int,
+    file: File,
+) {
+    try {
+        if (file.exists()) {
+            val backupFile = File("${file.absolutePath}.bak")
+            file.copyTo(backupFile, overwrite = true)
+            file.delete()
+            println("[$logTag] INFO: Rotated to: ${backupFile.absolutePath}")
+        }
 
-    val fileName = System.getenv("PROXY_FILE_NAME") ?: DEFAULT_FILE_NAME
-    val outFile = File(fileName)
-
-    // Analyze existing file
-    val oldHash = if (outFile.exists()) {
-        val content = outFile.readText()
-        val hash = calculateHash(content)
-        val linesCount = content.lines().filter { it.isNotBlank() }.count()
-        println("INFO: Found existing file: ${outFile.name} " +
-            "($linesCount proxies, sha256: ${hash.take(8)})")
-        hash
-    } else {
-        println("INFO: No existing file found at ${outFile.absolutePath}. Will create a new one.")
-        ""
-    }
-
-    // Download and validate new data
-    println("INFO: Fetching data from URL: $targetUrl")
-    val proxyList = downloadProxies(targetUrl)
-    if (proxyList.isEmpty()) {
-        System.err.println("ERROR: Downloaded proxy list is empty or unreachable.")
-        exitProcess(ExitCode.ERROR_VALIDATION.value)
-    }
-
-    // Analyze new data
-    val newContent = proxyList.joinToString("\n")
-    val newHash = calculateHash(newContent)
-    println("INFO: Successfully parsed ${proxyList.size} clean proxies from remote (sha256: ${newHash.take(8)})")
-
-    if (newHash != oldHash) {
-        println("INFO: Remote content changed. Initiating file update...")
-        saveProxiesWithBackup(newContent, proxyList.size, outFile)
-    } else {
-        println("INFO: Remote content is identical to local file. Skipping update.")
+        file.writeText(content)
+        println("[$logTag] SUCCESS: Saved $proxyCount proxies to: ${file.absolutePath}")
+    } catch (e: Exception) {
+        System.err.println("[$logTag] ERROR: Failed to write output file: ${e.message}")
+        exitProcess(ExitCode.IoError.value)
     }
 }
 
 /**
  * Downloads proxy list from the given URL and cleans the data.
- * Returns the list of clean, non-empty proxy strings.
+ *
+ * @param url the URL to download the proxy list from.
+ * @return the list of clean, non-empty proxy strings.
  */
 fun downloadProxies(url: String): List<String> {
     val client = HttpClient.newHttpClient()
-    val request = HttpRequest.newBuilder()
-        .uri(URI.create(url))
-        .GET()
-        .build()
+    val request =
+        HttpRequest
+            .newBuilder()
+            .uri(URI.create(url))
+            .GET()
+            .build()
 
     return try {
         val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
         if (response.statusCode() == 200) {
             val rawBody = response.body()
-            val rawLines = rawBody.split("\n")
-            val cleanLines = rawLines.map { it.trim() }.filter { it.isNotEmpty() }
+            val rawLines = rawBody.lines()
+            val cleanLines =
+                rawLines
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
 
             val skippedLines = rawLines.size - cleanLines.size
             if (skippedLines > 0) {
-                println("INFO: Removed $skippedLines empty lines/whitespaces from raw response.")
+                println("[$logTag] INFO: Filtered $skippedLines empty/invalid rows.")
             }
             cleanLines
         } else {
-            System.err.println("ERROR: Server responded with unexpected status code: ${response.statusCode()}")
+            System.err.println(
+                "[$logTag] ERROR: Unexpected server response code: ${response.statusCode()}",
+            )
             emptyList()
         }
     } catch (e: Exception) {
-        System.err.println("ERROR: Network request failed: ${e.message}")
+        System.err.println("[$logTag] ERROR: Network request failed: ${e.message}")
         emptyList()
     }
 }
 
-/**
- * Backs up the existing file if it exists and writes the fresh proxy list.
- */
-fun saveProxiesWithBackup(content: String, proxyCount: Int, file: File) {
-    try {
-        if (file.exists()) {
-            val backupFile = File("${file.absolutePath}.bak")
+fun main() {
+    println("[$logTag] INFO: Starting proxy parser...")
 
-            Files.move(
-                file.toPath(),
-                backupFile.toPath(),
-                StandardCopyOption.REPLACE_EXISTING
+    val outFile = File(fileName)
+
+    // Analyze existing file
+    val oldHash =
+        if (outFile.exists()) {
+            val content = outFile.readText()
+            val hash = calculateHash(content)
+            val linesCount = content.lines().filter { it.isNotBlank() }.count()
+            println(
+                "[$logTag] INFO: Local: ${outFile.name} ($linesCount proxies, sha256: ${hash.take(8)})",
             )
-            println("INFO: Rotated old file to: ${backupFile.absolutePath}")
+            hash
+        } else {
+            println("[$logTag] INFO: Local cache not found: ${outFile.name}.")
+            ""
         }
 
-        file.writeText(content)
-        println("SUCCESS: [IO] Wrote $proxyCount proxies to: ${file.absolutePath}")
-    } catch (e: Exception) {
-        System.err.println("ERROR: Failed to write output file: ${e.message}")
-        exitProcess(ExitCode.ERROR_IO.value)
+    // Download and validate new data
+    println("[$logTag] INFO: Fetching: $targetUrl")
+    val proxyList = downloadProxies(targetUrl)
+    if (proxyList.isEmpty()) {
+        System.err.println("[$logTag] ERROR: Downloaded proxy list is empty or unreachable.")
+        exitProcess(ExitCode.ValidationError.value)
     }
-}
 
-/**
- * Calculates SHA-256 hash of a given string.
- */
-fun calculateHash(inp: String): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    val hashBytes = digest.digest(inp.toByteArray())
-    return hashBytes.joinToString("") { "%02x".format(it) }
+    // Analyze new data
+    val newContent = proxyList.joinToString("\n")
+    val newHash = calculateHash(newContent)
+    println("[$logTag] INFO: Remote: ${proxyList.size} proxies (sha256: ${newHash.take(8)})")
+
+    if (newHash != oldHash) {
+        saveProxiesWithBackup(newContent, proxyList.size, outFile)
+    } else {
+        println("[$logTag] INFO: Remote content is identical to local file. Skipping update.")
+    }
 }
 
 main()
