@@ -1,0 +1,17 @@
+# Global Development Environment Configuration
+# Copy this file to .envrc and modify it according to your local system.
+
+# Target JDK path (modify if your local path differs)
+export JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
+
+# Proxy Parser Configuration
+export PROXY_FILE_NAME="downloaded-proxies.txt"
+export TARGET_URL="https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt"
+
+# Proxy Checker Configuration
+export CHECK_TARGET_URL="https://medium.com/"
+export CHECK_THREADS=120
+export CHECK_CONNECT_TIMEOUT=3
+export CHECK_REQUEST_TIMEOUT=3
+export VALID_PROXY_FILE="valid-proxies.txt"
+# export CHECK_LIMIT=10
